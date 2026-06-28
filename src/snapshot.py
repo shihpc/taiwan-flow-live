@@ -112,7 +112,7 @@ def build_live() -> dict:
         pts = 0.0
         if sh and not etf and mkt in sum_mc and sum_mc[mkt]:
             pts = dI[mkt] * (dp * sh) / sum_mc[mkt]
-        stocks[code] = [round(chg, 2), round(amt), close, vol, round(bv), round(sv), round(pts, 3)]
+        stocks[code] = [round(chg, 2), round(amt), close, vol, round(bv), round(sv), round(pts, 3), round(dp, 2)]
         m = MKT.get(mkt)
         if not m:
             continue  # 無市場別（極少）→ 不計入分市場統計
@@ -133,7 +133,7 @@ def build_live() -> dict:
     market = {k: {"amt_yi": round(v["amt"] / 1e8, 1), "up": v["up"], "down": v["down"],
                   "flat": v["flat"], "n": v["n"]} for k, v in mk.items()}
     live = {"ts": ts, "generated_at": datetime.now(TPE).isoformat(),
-            "stock_cols": ["chg", "amt", "close", "vol", "bv", "sv", "pts"],
+            "stock_cols": ["chg", "amt", "close", "vol", "bv", "sv", "pts", "dp"],
             "index": {"tse": _idx(idxrow, "001"), "otc": _idx(idxrow, "101")},
             "market": market, "exchange": _finalize(ex), "chain": _finalize(ch),
             "chain_coverage": {"with_chain": cov, "total": len(stocks)},

@@ -36,6 +36,7 @@ th{position:sticky;top:0;background:var(--panel2);color:var(--dim);font-weight:5
 td.l,th.l{text-align:left}
 tbody tr:nth-child(odd) td{background:#0c121a}
 tbody tr:active td{background:#16222f}
+tr.pin td{background:#16202c;font-weight:600;border-bottom:1px solid var(--accent)}
 .up{color:var(--up)}.down{color:var(--down)}.mut{color:var(--muted)}
 .sl{cursor:pointer;border-bottom:1px dotted currentColor}
 .sl.sel{font-weight:700;border-bottom-style:solid}
@@ -75,18 +76,19 @@ const num=v=>v==null?"—":Math.round(v).toLocaleString("en-US");
 const pct=v=>v==null?"—":(v>0?"+":"")+v.toFixed(2)+"%";
 const sgn=(v,t)=>`<span class="${v>0?'up':v<0?'down':'mut'}">${t}</span>`;
 const yahoo=c=>`<a href="https://tw.stock.yahoo.com/quote/${c}" target="_blank" rel="noopener" style="color:var(--accent)">${c}</a>`;
-const SC=["chg","amt","close","vol","bv","sv","pts"]; // live.stocks 陣列欄位（後備）
+const SC=["chg","amt","close","vol","bv","sv","pts","dp"]; // live.stocks 陣列欄位（後備）
 const sval=(code)=>{const a=state.live.stocks[code]; if(!a)return null; const cols=(state.live&&state.live.stock_cols)||SC; const o={}; cols.forEach((k,i)=>o[k]=a[i]); return o;};
 
 // ---- sortable table ----
 const T={}; let TID=0;
 const ctext=h=>{const d=document.createElement("div");d.innerHTML=h;return d.textContent.trim();};
 const sv=t=>{if(t===""||t==="—")return null;const n=parseFloat(t.replace(/,/g,"").replace(/[^0-9.\-]/g,""));return isNaN(n)?t:n;};
-function tbl(cols,rows){const id="t"+(++TID);T[id]={cols,rows:[...rows],s:{i:null,d:1}};return `<div class="tablewrap scrollbox" data-t="${id}">${tinner(id)}</div>`;}
-function tinner(id){const{cols,rows,s}=T[id];
-  const h=cols.map((c,i)=>`<th class="${c.cls||''}" data-i="${i}">${c.h}${s.i===i?(s.d>0?" ▲":" ▼"):""}</th>`).join("");
-  const b=rows.map(r=>"<tr>"+cols.map(c=>`<td class="${c.cls||''}">${c.f(r)}</td>`).join("")+"</tr>").join("");
-  return `<table><thead><tr>${h}</tr></thead><tbody>${b}</tbody></table>`;}
+function tbl(cols,rows,pin){const id="t"+(++TID);T[id]={cols,rows:[...rows],s:{i:null,d:1},pin:pin||null};return `<div class="tablewrap scrollbox" data-t="${id}">${tinner(id)}</div>`;}
+function tinner(id){const{cols,rows,s,pin}=T[id];
+  const w=c=>c.w?`width:${c.w}px;min-width:${c.w}px;max-width:${c.w}px`:'';
+  const h=cols.map((c,i)=>`<th class="${c.cls||''}" style="${w(c)}" data-i="${i}">${c.h}${s.i===i?(s.d>0?" ▲":" ▼"):""}</th>`).join("");
+  const tr=(r,cls)=>`<tr class="${cls||''}">`+cols.map(c=>`<td class="${c.cls||''}" style="${w(c)}">${c.f(r)}</td>`).join("")+"</tr>";
+  return `<table><thead><tr>${h}</tr></thead><tbody>${pin?tr(pin,"pin"):""}${rows.map(r=>tr(r)).join("")}</tbody></table>`;}
 document.addEventListener("click",e=>{const th=e.target.closest("th[data-i]");if(!th)return;
   const w=th.closest("[data-t]");if(!w)return;const o=T[w.dataset.t],i=+th.dataset.i;
   if(o.s.i===i)o.s.d*=-1;else{o.s.i=i;o.s.d=1;}const col=o.cols[i],d=o.s.d,val=r=>sv(ctext(col.f(r)));
@@ -116,24 +118,27 @@ function renderMarket(){
     `<div class="mkrow">${idxLine("櫃買",ix.otc,m.otc)}</div>`;
   document.getElementById("tsline").textContent="資料時間 "+(state.live.ts||"—")+(isLocal?"":" · 點更新觸發雲端重抓");
 }
-function secCols(){return[
-  {h:"類股",cls:"l",f:r=>`<span class="sl ${state.sub[state.tab].open===r.sector?'sel':''}" data-sec="${encodeURIComponent(r.sector)}">${r.sector}</span>`},
-  {h:"成交值",f:r=>yi(r.amt_yi)},
-  {h:"淨流入",f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))},
-  {h:"貢獻點",f:r=>sgn(r.pts||0,((r.pts||0)>0?"+":"")+(r.pts||0).toFixed(1))},
-  {h:"均漲跌",f:r=>sgn(r.avg_chg,pct(r.avg_chg))},
-  {h:"漲/跌",f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`},
-  {h:"檔",f:r=>r.n}];}
+// 三表共用欄寬（前5欄同寬同序；類股/次產業 第6-7欄＝漲/跌、檔；成分股＝漲跌額、最新價）
+const W=[104,74,82,58,62,60,66];
+const C_AMT={h:"成交值",w:W[1],f:r=>yi(r.amt_yi)};
+const C_INF={h:"淨流入",w:W[2],f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))};
+const C_PTS={h:"貢獻點",w:W[3],f:r=>sgn(r.pts||0,((r.pts||0)>0?"+":"")+(r.pts||0).toFixed(1))};
+function aggCols(nameH){return[
+  {h:nameH,cls:"l",w:W[0],f:r=>r.name}, C_AMT, C_INF, C_PTS,
+  {h:"漲跌%",w:W[4],f:r=>sgn(r.avg_chg,pct(r.avg_chg))},
+  {h:"漲/跌",w:W[5],f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`},
+  {h:"檔",w:W[6],f:r=>r.n}];}
+function stockCols(){return[
+  {h:"個股",cls:"l",w:W[0],f:r=>r.name}, C_AMT, C_INF, C_PTS,
+  {h:"漲跌%",w:W[4],f:r=>r.chgp==null?'<span class="mut">—</span>':sgn(r.chgp,pct(r.chgp))},
+  {h:"漲跌額",w:W[5],f:r=>r.dp==null?'<span class="mut">—</span>':sgn(r.dp,(r.dp>0?"+":"")+r.dp.toFixed(2))},
+  {h:"最新價",w:W[6],f:r=>r.price==null?'<span class="mut">—</span>':r.price.toLocaleString("en-US")}];}
+function sumRow(a,label){return {name:`<b>${label} 合計</b>`,amt_yi:a.amt_yi,inflow_yi:a.inflow_yi,pts:a.pts,chgp:a.avg_chg,dp:null,price:null};}
 function stockRows(codes){
   const want=state.idx==="tse"?"twse":"tpex";
-  return codes.filter(c=>(state.cl[c]||{}).t===want).map(c=>{const v=sval(c);if(!v)return null;const info=state.cl[c]||{};
-    return {code:c,name:info.n||c,chg:v.chg,amt:v.amt/1e8,close:v.close,pts:v.pts};})
-    .filter(Boolean).filter(r=>r.amt>0).sort((a,b)=>b.amt-a.amt);}
-function stockCols(){return[
-  {h:"代號",cls:"l",f:r=>yahoo(r.code)},{h:"名稱",cls:"l",f:r=>r.name},
-  {h:"漲跌",f:r=>sgn(r.chg,pct(r.chg))},{h:"成交值",f:r=>yi(r.amt)},
-  {h:"貢獻點",f:r=>r.pts==null?'<span class="mut">—</span>':sgn(r.pts,(r.pts>0?"+":"")+r.pts.toFixed(2))},
-  {h:"收盤",f:r=>r.close==null?"—":r.close.toLocaleString("en-US")}];}
+  return codes.filter(c=>(state.cl[c]||{}).t===want).map(c=>{const v=sval(c);if(!v)return null;const info=state.cl[c]||{};const a=v.amt/1e8;
+    return {name:`${yahoo(c)} ${info.n||c}`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close};})
+    .filter(Boolean).filter(r=>r.amt_yi>0).sort((x,y)=>y.amt_yi-x.amt_yi);}
 
 function render(){
   for(const k in T)delete T[k];
@@ -141,7 +146,8 @@ function render(){
   if(!state.live||!state.cl){document.getElementById("main").innerHTML='<div class="loading">載入中…</div>';return;}
   renderMarket();
   const open=state.sub[state.tab].open;
-  const list=(state.live[state.tab]||[]).map(s=>({sector:s.sector,...s[state.idx]}))
+  const list=(state.live[state.tab]||[]).map(s=>{const o={sector:s.sector,...s[state.idx]};
+      o.name=`<span class="sl ${open===s.sector?'sel':''}" data-sec="${encodeURIComponent(s.sector)}">${s.sector}</span>`;return o;})
     .filter(r=>r.n>0).sort((a,b)=>b.amt_yi-a.amt_yi);
   let html="";
   if(state.tab==="chain"){const c=state.live.chain_coverage||{};
@@ -150,11 +156,12 @@ function render(){
   html+=`<div style="display:flex;gap:6px;margin:2px 0 8px;align-items:center"><span class="mut" style="font-size:11px">貢獻點對象</span>
     <button class="seg2 ${state.idx==='tse'?'on':''}" data-idx="tse">加權(TSE)</button>
     <button class="seg2 ${state.idx==='otc'?'on':''}" data-idx="otc">櫃買(OTC)</button></div>`;
-  html+=tbl(secCols(),list);
+  html+=tbl(aggCols("類股"),list);
   if(open){
     if(state.tab==="exchange"){
       const codes=Object.keys(state.cl).filter(c=>state.cl[c].e===open);
-      html+=`<div id="dd"><div class="crumb"><b>${open}</b> · ${stockRows(codes).length} 檔成分股（再點類股收合）</div>`+tbl(stockCols(),stockRows(codes))+`</div>`;
+      const rows=stockRows(codes), agg=list.find(r=>r.sector===open);
+      html+=`<div id="dd"><div class="crumb"><b>${open}</b> 成分股（${rows.length}，再點類股收合）</div>`+tbl(stockCols(),rows,agg?sumRow(agg,open):null)+`</div>`;
     }else html+=`<div id="dd">`+chainSub(open)+`</div>`;
   }
   document.getElementById("main").innerHTML=html;
@@ -170,15 +177,13 @@ function chainSub(ind){
       const a=v.amt;o.amt+=a;o.wchg+=v.chg*a;o.n++;o.pts+=v.pts;
       if(v.chg>0){o.up++;o.inflow+=a;}else if(v.chg<0){o.down++;o.inflow-=a;}}}
   const subs=Object.values(agg).map(o=>({sub:o.sub,amt_yi:o.amt/1e8,inflow_yi:o.inflow/1e8,
-    avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n,pts:o.pts})).filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
-  const cols=[
-    {h:"次產業",cls:"l",f:r=>`<span class="sl ${opensub===r.sub?'sel':''}" data-sub="${encodeURIComponent(r.sub)}">${r.sub}</span>`},
-    {h:"成交值",f:r=>yi(r.amt_yi)},{h:"淨流入",f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))},
-    {h:"貢獻點",f:r=>sgn(r.pts,(r.pts>0?"+":"")+r.pts.toFixed(1))},
-    {h:"均漲跌",f:r=>sgn(r.avg_chg,pct(r.avg_chg))},{h:"漲/跌",f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`}];
-  let html=`<div class="crumb"><b>${ind}</b> · ${subs.length} 次產業（點看成分股；再點類股收合）</div>`+tbl(cols,subs);
+    avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n,pts:o.pts,
+    name:`<span class="sl ${opensub===o.sub?'sel':''}" data-sub="${encodeURIComponent(o.sub)}">${o.sub}</span>`}))
+    .filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
+  let html=`<div class="crumb"><b>${ind}</b> · ${subs.length} 次產業（點看成分股；再點類股收合）</div>`+tbl(aggCols("次產業"),subs);
   if(opensub){const codes=Object.keys(state.cl).filter(c=>state.cl[c].p.some(p=>p[0]===ind&&p[1]===opensub));
-    html+=`<div id="dd2"><div class="crumb">${ind} › <b>${opensub}</b> · ${stockRows(codes).length} 檔</div>`+tbl(stockCols(),stockRows(codes))+`</div>`;}
+    const rows=stockRows(codes), sa=subs.find(s=>s.sub===opensub);
+    html+=`<div id="dd2"><div class="crumb">${ind} › <b>${opensub}</b> 成分股（${rows.length}）</div>`+tbl(stockCols(),rows,sa?sumRow(sa,opensub):null)+`</div>`;}
   return html;
 }
 document.addEventListener("click",e=>{const b=e.target.closest("[data-idx]");if(!b)return;state.idx=b.dataset.idx;render();});
