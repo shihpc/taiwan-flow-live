@@ -76,6 +76,7 @@ const num=v=>v==null?"—":Math.round(v).toLocaleString("en-US");
 const pct=v=>v==null?"—":(v>0?"+":"")+v.toFixed(2)+"%";
 const sgn=(v,t)=>`<span class="${v>0?'up':v<0?'down':'mut'}">${t}</span>`;
 const yahoo=c=>`<a href="https://tw.stock.yahoo.com/quote/${c}" target="_blank" rel="noopener" style="color:var(--accent)">${c}</a>`;
+const cleanSub=s=>(s||"").replace(/\s*[（(].*$/,"");  // 次產業顯示去掉括號內說明
 const SC=["chg","amt","close","vol","bv","sv","pts","dp"]; // live.stocks 陣列欄位（後備）
 const sval=(code)=>{const a=state.live.stocks[code]; if(!a)return null; const cols=(state.live&&state.live.stock_cols)||SC; const o={}; cols.forEach((k,i)=>o[k]=a[i]); return o;};
 
@@ -178,12 +179,12 @@ function chainSub(ind){
       if(v.chg>0){o.up++;o.inflow+=a;}else if(v.chg<0){o.down++;o.inflow-=a;}}}
   const subs=Object.values(agg).map(o=>({sub:o.sub,amt_yi:o.amt/1e8,inflow_yi:o.inflow/1e8,
     avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n,pts:o.pts,
-    name:`<span class="sl ${opensub===o.sub?'sel':''}" data-sub="${encodeURIComponent(o.sub)}">${o.sub}</span>`}))
+    name:`<span class="sl ${opensub===o.sub?'sel':''}" data-sub="${encodeURIComponent(o.sub)}">${cleanSub(o.sub)}</span>`}))
     .filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
   let html=`<div class="crumb"><b>${ind}</b> · ${subs.length} 次產業（點看成分股；再點類股收合）</div>`+tbl(aggCols("次產業"),subs);
   if(opensub){const codes=Object.keys(state.cl).filter(c=>state.cl[c].p.some(p=>p[0]===ind&&p[1]===opensub));
     const rows=stockRows(codes), sa=subs.find(s=>s.sub===opensub);
-    html+=`<div id="dd2"><div class="crumb">${ind} › <b>${opensub}</b> 成分股（${rows.length}）</div>`+tbl(stockCols(),rows,sa?sumRow(sa,opensub):null)+`</div>`;}
+    html+=`<div id="dd2"><div class="crumb">${ind} › <b>${cleanSub(opensub)}</b> 成分股（${rows.length}）</div>`+tbl(stockCols(),rows,sa?sumRow(sa,cleanSub(opensub)):null)+`</div>`;}
   return html;
 }
 document.addEventListener("click",e=>{const b=e.target.closest("[data-idx]");if(!b)return;state.idx=b.dataset.idx;render();});
