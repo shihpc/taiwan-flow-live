@@ -103,31 +103,31 @@ document.addEventListener("click",e=>{const s=e.target.closest(".sl[data-sub]");
   state.sub.chain.opensub=cur===v?null:v;render();});
 
 // ---- render ----
-function idxLine(label,d){
+function idxLine(label,d,mk){
   if(!d||d.val==null)return `<span>${label} <span class="mut">—</span></span>`;
   const v=d.val.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
-  return `<span>${label} <b>${v}</b> ${sgn(d.chgP,(d.chgP>0?'+':'')+d.chgP.toFixed(2)+' ('+pct(d.chg)+')')} <span class="mut">量${yi(d.amt_yi)}</span></span>`;
+  const cnt=mk?` <span class="mut">漲<span class="up">${mk.up}</span>/跌<span class="down">${mk.down}</span> ${mk.n}檔</span>`:"";
+  return `<span>${label} <b>${v}</b> ${sgn(d.chgP,(d.chgP>0?'+':'')+d.chgP.toFixed(2)+' ('+pct(d.chg)+')')} <span class="mut">量${yi(d.amt_yi)}</span>${cnt}</span>`;
 }
 function renderMarket(){
-  const m=state.live.market, ix=state.live.index||{};
+  const ix=state.live.index||{}, m=state.live.market||{};
   document.getElementById("mkcard").innerHTML=
-    `<div class="mkrow">${idxLine("加權",ix.tse)}</div>`+
-    `<div class="mkrow">${idxLine("櫃買",ix.otc)}</div>`+
-    `<div class="mkrow" style="font-size:13px"><span>漲 <b class="up">${m.up}</b> / 跌 <b class="down">${m.down}</b> / 平 <span class="mut">${m.flat}</span></span><span class="mut">${m.n} 檔 · 成交 ${yi(m.amt_yi)}</span></div>`;
+    `<div class="mkrow">${idxLine("加權",ix.tse,m.tse)}</div>`+
+    `<div class="mkrow">${idxLine("櫃買",ix.otc,m.otc)}</div>`;
   document.getElementById("tsline").textContent="資料時間 "+(state.live.ts||"—")+(isLocal?"":" · 點更新觸發雲端重抓");
 }
 function secCols(){return[
   {h:"類股",cls:"l",f:r=>`<span class="sl ${state.sub[state.tab].open===r.sector?'sel':''}" data-sec="${encodeURIComponent(r.sector)}">${r.sector}</span>`},
   {h:"成交值",f:r=>yi(r.amt_yi)},
   {h:"淨流入",f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))},
-  {h:"貢獻點",f:r=>{const p=(state.idx==="tse"?r.pts_tse:r.pts_otc)||0;return sgn(p,(p>0?"+":"")+p.toFixed(1));}},
+  {h:"貢獻點",f:r=>sgn(r.pts||0,((r.pts||0)>0?"+":"")+(r.pts||0).toFixed(1))},
   {h:"均漲跌",f:r=>sgn(r.avg_chg,pct(r.avg_chg))},
   {h:"漲/跌",f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`},
   {h:"檔",f:r=>r.n}];}
 function stockRows(codes){
   const want=state.idx==="tse"?"twse":"tpex";
-  return codes.map(c=>{const v=sval(c);if(!v)return null;const info=state.cl[c]||{};
-    return {code:c,name:info.n||c,chg:v.chg,amt:v.amt/1e8,close:v.close,pts:info.t===want?v.pts:null};})
+  return codes.filter(c=>(state.cl[c]||{}).t===want).map(c=>{const v=sval(c);if(!v)return null;const info=state.cl[c]||{};
+    return {code:c,name:info.n||c,chg:v.chg,amt:v.amt/1e8,close:v.close,pts:v.pts};})
     .filter(Boolean).filter(r=>r.amt>0).sort((a,b)=>b.amt-a.amt);}
 function stockCols(){return[
   {h:"代號",cls:"l",f:r=>yahoo(r.code)},{h:"名稱",cls:"l",f:r=>r.name},
@@ -140,7 +140,9 @@ function render(){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===state.tab));
   if(!state.live||!state.cl){document.getElementById("main").innerHTML='<div class="loading">載入中…</div>';return;}
   renderMarket();
-  const list=state.live[state.tab]||[], open=state.sub[state.tab].open;
+  const open=state.sub[state.tab].open;
+  const list=(state.live[state.tab]||[]).map(s=>({sector:s.sector,...s[state.idx]}))
+    .filter(r=>r.n>0).sort((a,b)=>b.amt_yi-a.amt_yi);
   let html="";
   if(state.tab==="chain"){const c=state.live.chain_coverage||{};
     html+=`<div class="note">產業鏈為<b>多對多</b>（一檔可屬多類）：各類加總會重疊、非市佔，代表主題曝險；不含指數/部分標的（涵蓋 ${c.with_chain||"—"}/${c.total||"—"} 檔）。點類股看次產業→成分股。</div>`;
@@ -162,10 +164,10 @@ function render(){
 }
 function chainSub(ind){
   const opensub=state.sub.chain.opensub, agg={}, want=state.idx==="tse"?"twse":"tpex";
-  for(const c in state.cl){const info=state.cl[c];if(!info.c.includes(ind))continue;const v=sval(c);if(!v)continue;
+  for(const c in state.cl){const info=state.cl[c];if(!info.c.includes(ind)||info.t!==want)continue;const v=sval(c);if(!v)continue;
     const subs=[...new Set(info.p.filter(p=>p[0]===ind).map(p=>p[1]))];
     for(const s of subs){const o=agg[s]||(agg[s]={sub:s,amt:0,inflow:0,wchg:0,up:0,down:0,n:0,pts:0});
-      const a=v.amt;o.amt+=a;o.wchg+=v.chg*a;o.n++;if(info.t===want)o.pts+=v.pts;
+      const a=v.amt;o.amt+=a;o.wchg+=v.chg*a;o.n++;o.pts+=v.pts;
       if(v.chg>0){o.up++;o.inflow+=a;}else if(v.chg<0){o.down++;o.inflow-=a;}}}
   const subs=Object.values(agg).map(o=>({sub:o.sub,amt_yi:o.amt/1e8,inflow_yi:o.inflow/1e8,
     avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n,pts:o.pts})).filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
