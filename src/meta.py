@@ -26,14 +26,26 @@ def build() -> dict:
     info = fin.api_get("TaiwanStockInfo")
     print("抓 TaiwanStockIndustryChain …")
     chain = fin.api_get("TaiwanStockIndustryChain")
+    print("抓 TaiwanStockShareholding（發行股數，指數貢獻點數用）…")
+    today = datetime.now(TPE).date()
+    start = (today - timedelta(days=18)).isoformat()
+    share = fin.api_get("TaiwanStockShareholding", start_date=start, end_date=today.isoformat())
 
-    name, exch = {}, {}
+    name, exch, mtype = {}, {}, {}
     for r in info:
         c = str(r["stock_id"])
         name[c] = r.get("stock_name") or c
         ind = str(r.get("industry_category") or "").strip()
         ind = EXCH_ALIAS.get(ind, ind) or "其他"
         exch.setdefault(c, ind)
+        mtype.setdefault(c, str(r.get("type") or ""))  # twse / tpex
+
+    # 發行股數（張）：取區間內最新一筆
+    shares = {}
+    for r in sorted(share, key=lambda x: x.get("date") or ""):
+        v = r.get("NumberOfSharesIssued")
+        if v:
+            shares[str(r["stock_id"])] = round(float(v) / 1000)
 
     ch: dict[str, dict] = {}
     for r in chain:
@@ -48,13 +60,15 @@ def build() -> dict:
     m = {}
     for c in set(list(name) + list(exch) + list(ch)):
         e = ch.get(c, {"c": [], "p": []})
-        m[c] = {"n": name.get(c, c), "e": exch.get(c, "其他"), "c": e["c"], "p": e["p"]}
+        m[c] = {"n": name.get(c, c), "e": exch.get(c, "其他"), "c": e["c"], "p": e["p"],
+                "t": mtype.get(c, ""), "sh": shares.get(c, 0)}  # t:市場(twse/tpex)、sh:發行張數
 
     snap = {"generated_at": datetime.now(TPE).isoformat(), "count": len(m), "map": m}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(snap, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     n_chain = sum(1 for v in m.values() if v["c"])
-    print(f"已寫入 {OUT.relative_to(fin.ROOT)}：{len(m)} 檔（有產業鏈分類 {n_chain}）, "
+    n_sh = sum(1 for v in m.values() if v["sh"])
+    print(f"已寫入 {OUT.relative_to(fin.ROOT)}：{len(m)} 檔（產業鏈 {n_chain}、有發行股數 {n_sh}）, "
           f"{OUT.stat().st_size/1024:.0f} KB")
     return snap
 

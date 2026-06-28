@@ -24,6 +24,8 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px so
 .tab{padding:6px 12px;border:1px solid var(--line);border-bottom:none;background:var(--panel);
   color:var(--dim);border-radius:7px 7px 0 0;cursor:pointer;white-space:nowrap}
 .tab.active{background:var(--panel2);color:var(--fg);font-weight:700}
+.seg2{background:var(--panel2);border:1px solid var(--line);color:var(--dim);border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer}
+.seg2.on{background:#1c3146;color:var(--fg);border-color:var(--accent)}
 main{padding:8px 10px 30px}
 .note{font-size:11px;color:var(--dim);margin:2px 0 6px}
 .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px;-webkit-overflow-scrolling:touch}
@@ -65,7 +67,7 @@ const REPO={owner:"shihpc", repo:"taiwan-flow-live", branch:"main", workflow:"sn
 const isLocal=["localhost","127.0.0.1"].includes(location.hostname);
 const RAW=`https://raw.githubusercontent.com/${REPO.owner}/${REPO.repo}/${REPO.branch}/data/live.json`;
 
-const state={tab:"exchange", live:null, cl:null, sub:{exchange:{open:null}, chain:{open:null,opensub:null}}};
+const state={tab:"exchange", idx:"tse", live:null, cl:null, sub:{exchange:{open:null}, chain:{open:null,opensub:null}}};
 
 // ---- formatters ----
 const yi=v=>v==null?"—":v.toLocaleString("en-US",{minimumFractionDigits:1,maximumFractionDigits:1})+"億";
@@ -73,8 +75,8 @@ const num=v=>v==null?"—":Math.round(v).toLocaleString("en-US");
 const pct=v=>v==null?"—":(v>0?"+":"")+v.toFixed(2)+"%";
 const sgn=(v,t)=>`<span class="${v>0?'up':v<0?'down':'mut'}">${t}</span>`;
 const yahoo=c=>`<a href="https://tw.stock.yahoo.com/quote/${c}" target="_blank" rel="noopener" style="color:var(--accent)">${c}</a>`;
-const SC=["chg","amt","close","vol","bv","sv"]; // live.stocks 陣列欄位
-const sval=(code)=>{const a=state.live.stocks[code]; if(!a)return null; const o={}; SC.forEach((k,i)=>o[k]=a[i]); return o;};
+const SC=["chg","amt","close","vol","bv","sv","pts"]; // live.stocks 陣列欄位（後備）
+const sval=(code)=>{const a=state.live.stocks[code]; if(!a)return null; const cols=(state.live&&state.live.stock_cols)||SC; const o={}; cols.forEach((k,i)=>o[k]=a[i]); return o;};
 
 // ---- sortable table ----
 const T={}; let TID=0;
@@ -101,28 +103,36 @@ document.addEventListener("click",e=>{const s=e.target.closest(".sl[data-sub]");
   state.sub.chain.opensub=cur===v?null:v;render();});
 
 // ---- render ----
+function idxLine(label,d){
+  if(!d||d.val==null)return `<span>${label} <span class="mut">—</span></span>`;
+  const v=d.val.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return `<span>${label} <b>${v}</b> ${sgn(d.chgP,(d.chgP>0?'+':'')+d.chgP.toFixed(2)+' ('+pct(d.chg)+')')} <span class="mut">量${yi(d.amt_yi)}</span></span>`;
+}
 function renderMarket(){
-  const m=state.live.market;
-  document.getElementById("mkcard").innerHTML=`<div class="mkrow">
-    <span>大盤成交 <b>${yi(m.amt_yi)}</b></span>
-    <span>漲 <b class="up">${m.up}</b> / 跌 <b class="down">${m.down}</b> / 平 <span class="mut">${m.flat}</span></span>
-    <span class="mut">${m.n} 檔</span></div>`;
+  const m=state.live.market, ix=state.live.index||{};
+  document.getElementById("mkcard").innerHTML=
+    `<div class="mkrow">${idxLine("加權",ix.tse)}</div>`+
+    `<div class="mkrow">${idxLine("櫃買",ix.otc)}</div>`+
+    `<div class="mkrow" style="font-size:13px"><span>漲 <b class="up">${m.up}</b> / 跌 <b class="down">${m.down}</b> / 平 <span class="mut">${m.flat}</span></span><span class="mut">${m.n} 檔 · 成交 ${yi(m.amt_yi)}</span></div>`;
   document.getElementById("tsline").textContent="資料時間 "+(state.live.ts||"—")+(isLocal?"":" · 點更新觸發雲端重抓");
 }
 function secCols(){return[
   {h:"類股",cls:"l",f:r=>`<span class="sl ${state.sub[state.tab].open===r.sector?'sel':''}" data-sec="${encodeURIComponent(r.sector)}">${r.sector}</span>`},
   {h:"成交值",f:r=>yi(r.amt_yi)},
   {h:"淨流入",f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))},
+  {h:"貢獻點",f:r=>{const p=(state.idx==="tse"?r.pts_tse:r.pts_otc)||0;return sgn(p,(p>0?"+":"")+p.toFixed(1));}},
   {h:"均漲跌",f:r=>sgn(r.avg_chg,pct(r.avg_chg))},
   {h:"漲/跌",f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`},
   {h:"檔",f:r=>r.n}];}
 function stockRows(codes){
-  return codes.map(c=>{const v=sval(c);if(!v)return null;
-    return {code:c,name:(state.cl[c]||{}).n||c,chg:v.chg,amt:v.amt/1e8,close:v.close};})
+  const want=state.idx==="tse"?"twse":"tpex";
+  return codes.map(c=>{const v=sval(c);if(!v)return null;const info=state.cl[c]||{};
+    return {code:c,name:info.n||c,chg:v.chg,amt:v.amt/1e8,close:v.close,pts:info.t===want?v.pts:null};})
     .filter(Boolean).filter(r=>r.amt>0).sort((a,b)=>b.amt-a.amt);}
 function stockCols(){return[
   {h:"代號",cls:"l",f:r=>yahoo(r.code)},{h:"名稱",cls:"l",f:r=>r.name},
   {h:"漲跌",f:r=>sgn(r.chg,pct(r.chg))},{h:"成交值",f:r=>yi(r.amt)},
+  {h:"貢獻點",f:r=>r.pts==null?'<span class="mut">—</span>':sgn(r.pts,(r.pts>0?"+":"")+r.pts.toFixed(2))},
   {h:"收盤",f:r=>r.close==null?"—":r.close.toLocaleString("en-US")}];}
 
 function render(){
@@ -134,7 +144,10 @@ function render(){
   let html="";
   if(state.tab==="chain"){const c=state.live.chain_coverage||{};
     html+=`<div class="note">產業鏈為<b>多對多</b>（一檔可屬多類）：各類加總會重疊、非市佔，代表主題曝險；不含指數/部分標的（涵蓋 ${c.with_chain||"—"}/${c.total||"—"} 檔）。點類股看次產業→成分股。</div>`;
-  }else html+=`<div class="note">交易所產業別（互斥）。淨流入＝漲家成交額−跌家成交額；均漲跌為成交額加權。點類股看成分股。</div>`;
+  }else html+=`<div class="note">交易所產業別（互斥）。淨流入＝漲家額−跌家額；貢獻點＝個股依市值權重對指數的漲跌點，類股加總＝指數漲跌點。點類股看成分股。</div>`;
+  html+=`<div style="display:flex;gap:6px;margin:2px 0 8px;align-items:center"><span class="mut" style="font-size:11px">貢獻點對象</span>
+    <button class="seg2 ${state.idx==='tse'?'on':''}" data-idx="tse">加權(TSE)</button>
+    <button class="seg2 ${state.idx==='otc'?'on':''}" data-idx="otc">櫃買(OTC)</button></div>`;
   html+=tbl(secCols(),list);
   if(open){
     if(state.tab==="exchange"){
@@ -148,22 +161,25 @@ function render(){
     const dd=document.getElementById("dd");if(dd)dd.scrollIntoView({behavior:"smooth",block:"start"});}
 }
 function chainSub(ind){
-  const opensub=state.sub.chain.opensub, agg={};
+  const opensub=state.sub.chain.opensub, agg={}, want=state.idx==="tse"?"twse":"tpex";
   for(const c in state.cl){const info=state.cl[c];if(!info.c.includes(ind))continue;const v=sval(c);if(!v)continue;
     const subs=[...new Set(info.p.filter(p=>p[0]===ind).map(p=>p[1]))];
-    for(const s of subs){const o=agg[s]||(agg[s]={sub:s,amt:0,inflow:0,wchg:0,up:0,down:0,n:0});
-      const a=v.amt;o.amt+=a;o.wchg+=v.chg*a;o.n++;if(v.chg>0){o.up++;o.inflow+=a;}else if(v.chg<0){o.down++;o.inflow-=a;}}}
+    for(const s of subs){const o=agg[s]||(agg[s]={sub:s,amt:0,inflow:0,wchg:0,up:0,down:0,n:0,pts:0});
+      const a=v.amt;o.amt+=a;o.wchg+=v.chg*a;o.n++;if(info.t===want)o.pts+=v.pts;
+      if(v.chg>0){o.up++;o.inflow+=a;}else if(v.chg<0){o.down++;o.inflow-=a;}}}
   const subs=Object.values(agg).map(o=>({sub:o.sub,amt_yi:o.amt/1e8,inflow_yi:o.inflow/1e8,
-    avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n})).filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
+    avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n,pts:o.pts})).filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
   const cols=[
     {h:"次產業",cls:"l",f:r=>`<span class="sl ${opensub===r.sub?'sel':''}" data-sub="${encodeURIComponent(r.sub)}">${r.sub}</span>`},
     {h:"成交值",f:r=>yi(r.amt_yi)},{h:"淨流入",f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))},
+    {h:"貢獻點",f:r=>sgn(r.pts,(r.pts>0?"+":"")+r.pts.toFixed(1))},
     {h:"均漲跌",f:r=>sgn(r.avg_chg,pct(r.avg_chg))},{h:"漲/跌",f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`}];
   let html=`<div class="crumb"><b>${ind}</b> · ${subs.length} 次產業（點看成分股；再點類股收合）</div>`+tbl(cols,subs);
   if(opensub){const codes=Object.keys(state.cl).filter(c=>state.cl[c].p.some(p=>p[0]===ind&&p[1]===opensub));
     html+=`<div id="dd2"><div class="crumb">${ind} › <b>${opensub}</b> · ${stockRows(codes).length} 檔</div>`+tbl(stockCols(),stockRows(codes))+`</div>`;}
   return html;
 }
+document.addEventListener("click",e=>{const b=e.target.closest("[data-idx]");if(!b)return;state.idx=b.dataset.idx;render();});
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{state.tab=t.dataset.tab;render();});
 
 // ---- data load / refresh ----

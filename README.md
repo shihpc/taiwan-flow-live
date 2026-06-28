@@ -9,8 +9,13 @@
   - 成交值＝`total_amount`（盤中累計成交金額）
   - 淨流入＝漲家成交額 − 跌家成交額（紅綠資金）
   - 均漲跌＝成交額加權漲跌幅；漲/跌家數
+- **大盤指數（TSE 加權＝snapshot `001`、OTC 櫃買＝`101`）**：即時指數值、漲跌點、漲跌%、成交量/額。
+- **指數貢獻點數**：個股對大盤漲跌點的影響 `pts_i = ΔIndex × (Δ價_i×發行股數_i) / Σ同市場(Δ價×股數)`
+  （構成股＝該市場普通股，排除 ETF），**類股加總＝指數漲跌點**（自洽）；前端可切「加權/櫃買」。
+  例：6/26 台積電 −408 點、半導體業 −850 點（全市場 −1,683 點）。
 - **分類**：產業別（`TaiwanStockInfo`，互斥）+ 產業鏈（`TaiwanStockIndustryChain`，多對多、含次產業）。
 - 已排除指數 pseudo-row（如 `001`=加權指數）——只計真實個股/ETF。
+- 權重資料：`TaiwanStockInfo.type`（twse/tpex）+ `TaiwanStockShareholding.NumberOfSharesIssued`（發行股數，存入 classify.json，meta.py 重建時更新）。
 
 ## 架構（純 GitHub，無自有伺服器）
 
