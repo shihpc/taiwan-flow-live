@@ -33,7 +33,8 @@ main{padding:8px 10px 30px}
 table{border-collapse:collapse;width:100%;white-space:nowrap}
 th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line);font-size:13px}
 th{position:sticky;top:0;background:var(--panel2);color:var(--dim);font-weight:500;font-size:11px;cursor:pointer;user-select:none}
-td.l,th.l{text-align:left;position:sticky;left:0;z-index:1;background:var(--bg)}
+td.l,th.l{text-align:left;position:sticky;left:0;z-index:1;background:var(--bg);overflow:hidden;text-overflow:ellipsis}
+.clk{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
 thead th.l{z-index:3;background:var(--panel2)}
 tbody tr:nth-child(odd) td{background:#0c121a}
 tbody tr:nth-child(odd) td.l{background:#0c121a}
@@ -73,7 +74,7 @@ const REPO={owner:"shihpc", repo:"taiwan-flow-live", branch:"main", workflow:"sn
 const isLocal=["localhost","127.0.0.1"].includes(location.hostname);
 const RAW=`https://raw.githubusercontent.com/${REPO.owner}/${REPO.repo}/${REPO.branch}/data/live.json`;
 
-const state={tab:"exchange", idx:"tse", live:null, cl:null, sub:{exchange:{open:null}, chain:{open:null,opensub:null}}};
+const state={tab:"exchange", idx:"tse", pool:null, live:null, cl:null, sub:{exchange:{open:null}, chain:{open:null,opensub:null}}};
 
 // ---- formatters ----
 const yi=v=>v==null?"—":v.toLocaleString("en-US",{minimumFractionDigits:1,maximumFractionDigits:1})+"億";
@@ -111,21 +112,22 @@ document.addEventListener("click",e=>{const s=e.target.closest(".sl[data-sub]");
   state.sub.chain.opensub=cur===v?null:v;render();});
 
 // ---- render ----
-function idxLine(label,d,mk){
+function idxLine(label,d,mk,key){
   if(!d||d.val==null)return `<span>${label} <span class="mut">—</span></span>`;
   const v=d.val.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const cnt=mk?` <span class="mut">漲<span class="up">${mk.up}(${mk.up_lim||0})</span>/跌<span class="down">${mk.down}(${mk.down_lim||0})</span> ${mk.n}檔</span>`:"";
+  const P=(k,cls,t)=>`<span class="${cls} clk" data-pool="${key}:${k}">${t}</span>`;
+  const cnt=mk?` <span class="mut">漲${P('up','up',mk.up)}(${P('ul','up',mk.up_lim||0)})/跌${P('down','down',mk.down)}(${P('dl','down',mk.down_lim||0)}) ${mk.n}檔</span>`:"";
   return `<span>${label} <b>${v}</b> ${sgn(d.chgP,(d.chgP>0?'+':'')+d.chgP.toFixed(2)+' ('+pct(d.chg)+')')} <span class="mut">量${yi(d.amt_yi)}</span>${cnt}</span>`;
 }
 function renderMarket(){
   const ix=state.live.index||{}, m=state.live.market||{};
   document.getElementById("mkcard").innerHTML=
-    `<div class="mkrow">${idxLine("加權",ix.tse,m.tse)}</div>`+
-    `<div class="mkrow">${idxLine("櫃買",ix.otc,m.otc)}</div>`;
+    `<div class="mkrow">${idxLine("加權",ix.tse,m.tse,"tse")}</div>`+
+    `<div class="mkrow">${idxLine("櫃買",ix.otc,m.otc,"otc")}</div>`;
   document.getElementById("tsline").textContent="資料時間 "+(state.live.ts||"—")+(isLocal?"":" · 點更新觸發雲端重抓");
 }
 // 三表共用欄寬（前5欄同寬同序；類股/次產業 第6-7欄＝漲/跌、檔；成分股＝漲跌額、最新價）
-const W=[104,74,82,58,62,60,66];
+const W=[116,74,82,58,62,60,66];
 const C_AMT={h:"成交值",w:W[1],f:r=>yi(r.amt_yi)};
 const C_INF={h:"淨流入",w:W[2],f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))};
 const C_PTS={h:"貢獻點",w:W[3],f:r=>sgn(r.pts||0,((r.pts||0)>0?"+":"")+(r.pts||0).toFixed(1))};
@@ -140,17 +142,31 @@ function stockCols(){return[
   {h:"漲跌額",w:W[5],f:r=>r.dp==null?'<span class="mut">—</span>':sgn(r.dp,(r.dp>0?"+":"")+r.dp.toFixed(2))},
   {h:"最新價",w:W[6],cf:r=>r.lim===1?'lu':r.lim===-1?'ld':'',f:r=>r.price==null?'<span class="mut">—</span>':r.price.toLocaleString("en-US")}];}
 function sumRow(a,label){return {name:`<b>${label} 合計</b>`,amt_yi:a.amt_yi,inflow_yi:a.inflow_yi,pts:a.pts,chgp:a.avg_chg,dp:null,price:null};}
+function mkStockRow(c){const v=sval(c);if(!v)return null;const info=state.cl[c]||{};const a=v.amt/1e8;
+  return {name:`${yahoo(c)} ${info.n||c}`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close,lim:v.lim};}
 function stockRows(codes){
   const want=state.idx==="tse"?"twse":"tpex";
-  return codes.filter(c=>(state.cl[c]||{}).t===want).map(c=>{const v=sval(c);if(!v)return null;const info=state.cl[c]||{};const a=v.amt/1e8;
-    return {name:`${yahoo(c)} ${info.n||c}`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close,lim:v.lim};})
-    .filter(Boolean).filter(r=>r.amt_yi>0).sort((x,y)=>y.amt_yi-x.amt_yi);}
+  return codes.filter(c=>(state.cl[c]||{}).t===want).map(mkStockRow).filter(Boolean).filter(r=>r.amt_yi>0).sort((x,y)=>y.amt_yi-x.amt_yi);}
+// 點卡片數字 → 該條件個股池（同欄位、依成交值排序）
+function renderPool(){
+  const {mkt,kind}=state.pool, want=mkt==="tse"?"twse":"tpex";
+  const sc=state.live.stock_cols, ci=sc.indexOf("chg"), li=sc.indexOf("lim");
+  const codes=Object.keys(state.live.stocks).filter(c=>{const info=state.cl[c];if(!info||info.t!==want)return false;
+    const v=state.live.stocks[c];return kind==="up"?v[ci]>0:kind==="down"?v[ci]<0:kind==="ul"?v[li]===1:v[li]===-1;});
+  const rows=codes.map(mkStockRow).filter(Boolean).sort((x,y)=>y.amt_yi-x.amt_yi);
+  const lab={up:"上漲",down:"下跌",ul:"漲停",dl:"跌停"}[kind], mn=mkt==="tse"?"加權":"櫃買";
+  let html=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><button class="btn" id="poolBack">← 返回</button><b>${mn} · ${lab}</b> <span class="mut">${rows.length} 檔（依成交值）</span></div>`;
+  html+=tbl(stockCols(),rows);
+  document.getElementById("main").innerHTML=html;
+  document.getElementById("poolBack").onclick=()=>{state.pool=null;render();};
+}
 
 function render(){
   for(const k in T)delete T[k];
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===state.tab));
   if(!state.live||!state.cl){document.getElementById("main").innerHTML='<div class="loading">載入中…</div>';return;}
   renderMarket();
+  if(state.pool)return renderPool();
   const open=state.sub[state.tab].open;
   const list=(state.live[state.tab]||[]).map(s=>{const o={sector:s.sector,...s[state.idx]};
       o.name=`<span class="sl ${open===s.sector?'sel':''}" data-sec="${encodeURIComponent(s.sector)}">${s.sector}</span>`;return o;})
@@ -192,8 +208,9 @@ function chainSub(ind){
     html+=`<div id="dd2"><div class="crumb">${ind} › <b>${cleanSub(opensub)}</b> 成分股（${rows.length}）</div>`+tbl(stockCols(),rows,sa?sumRow(sa,cleanSub(opensub)):null)+`</div>`;}
   return html;
 }
-document.addEventListener("click",e=>{const b=e.target.closest("[data-idx]");if(!b)return;state.idx=b.dataset.idx;render();});
-document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{state.tab=t.dataset.tab;render();});
+document.addEventListener("click",e=>{const el=e.target.closest("[data-pool]");if(!el)return;const a=el.dataset.pool.split(":");state.pool={mkt:a[0],kind:a[1]};render();});
+document.addEventListener("click",e=>{const b=e.target.closest("[data-idx]");if(!b)return;state.idx=b.dataset.idx;state.pool=null;render();});
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{state.tab=t.dataset.tab;state.pool=null;render();});
 
 // ---- data load / refresh ----
 async function loadJSON(u){return (await fetch(u,{cache:"no-store"})).json();}
