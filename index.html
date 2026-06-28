@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>即時資金流向</title>
+<style>
+:root{--bg:#0a0e14;--panel:#0f1620;--panel2:#141d29;--line:#1e2a38;--fg:#e6edf3;--dim:#8b98a8;
+  --up:#ff5a5a;--down:#3fd07f;--accent:#4aa8ff;--muted:#6b7888;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"Noto Sans TC",system-ui,sans-serif;font-size:14px}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 10px}
+.titlerow{display:flex;align-items:center;gap:8px}
+.brand{font-size:18px;font-weight:800}
+.spacer{flex:1}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:8px;
+  padding:5px 10px;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn:active{background:#1c2836}
+.tsline{font-size:11px;color:var(--dim);margin-top:3px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:8px 0}
+.mkrow{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline}
+.mkrow b{font-size:17px}
+.tabs{display:flex;gap:4px;margin-top:8px;overflow-x:auto}
+.tab{padding:6px 12px;border:1px solid var(--line);border-bottom:none;background:var(--panel);
+  color:var(--dim);border-radius:7px 7px 0 0;cursor:pointer;white-space:nowrap}
+.tab.active{background:var(--panel2);color:var(--fg);font-weight:700}
+main{padding:8px 10px 30px}
+.note{font-size:11px;color:var(--dim);margin:2px 0 6px}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px;-webkit-overflow-scrolling:touch}
+.scrollbox{max-height:62vh}
+table{border-collapse:collapse;width:100%;white-space:nowrap}
+th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line);font-size:13px}
+th{position:sticky;top:0;background:var(--panel2);color:var(--dim);font-weight:500;font-size:11px;cursor:pointer;user-select:none}
+td.l,th.l{text-align:left}
+tbody tr:nth-child(odd) td{background:#0c121a}
+tbody tr:active td{background:#16222f}
+.up{color:var(--up)}.down{color:var(--down)}.mut{color:var(--muted)}
+.sl{cursor:pointer;border-bottom:1px dotted currentColor}
+.sl.sel{font-weight:700;border-bottom-style:solid}
+.crumb{font-size:12px;color:var(--dim);margin:10px 0 4px}
+.loading{color:var(--dim);padding:20px;text-align:center}
+footer{color:var(--muted);font-size:11px;text-align:center;padding:14px}
+</style>
+</head>
+<body>
+<header>
+  <div class="titlerow">
+    <span class="brand">即時資金流向</span>
+    <span class="spacer"></span>
+    <button class="btn" id="refresh">🔄 更新</button>
+  </div>
+  <div class="tsline" id="tsline">載入中…</div>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-tab="exchange">產業別</div>
+    <div class="tab" data-tab="chain">產業鏈</div>
+  </div>
+</header>
+<div class="card" id="mkcard" style="margin:8px 10px"></div>
+<main id="main"><div class="loading">載入中…</div></main>
+<footer>資料 FinMind tick_snapshot（盤中即時／盤後為當日最終）· 紅漲綠跌 · 個股連 Yahoo</footer>
+
+<script>
+// ======== 設定（部署到自己的 repo 後改這裡）========
+const REPO={owner:"shihpc", repo:"taiwan-flow-live", branch:"main", workflow:"snapshot.yml"};
+const isLocal=["localhost","127.0.0.1"].includes(location.hostname);
+const RAW=`https://raw.githubusercontent.com/${REPO.owner}/${REPO.repo}/${REPO.branch}/data/live.json`;
+
+const state={tab:"exchange", live:null, cl:null, sub:{exchange:{open:null}, chain:{open:null,opensub:null}}};
+
+// ---- formatters ----
+const yi=v=>v==null?"—":v.toLocaleString("en-US",{minimumFractionDigits:1,maximumFractionDigits:1})+"億";
+const num=v=>v==null?"—":Math.round(v).toLocaleString("en-US");
+const pct=v=>v==null?"—":(v>0?"+":"")+v.toFixed(2)+"%";
+const sgn=(v,t)=>`<span class="${v>0?'up':v<0?'down':'mut'}">${t}</span>`;
+const yahoo=c=>`<a href="https://tw.stock.yahoo.com/quote/${c}" target="_blank" rel="noopener" style="color:var(--accent)">${c}</a>`;
+const SC=["chg","amt","close","vol","bv","sv"]; // live.stocks 陣列欄位
+const sval=(code)=>{const a=state.live.stocks[code]; if(!a)return null; const o={}; SC.forEach((k,i)=>o[k]=a[i]); return o;};
+
+// ---- sortable table ----
+const T={}; let TID=0;
+const ctext=h=>{const d=document.createElement("div");d.innerHTML=h;return d.textContent.trim();};
+const sv=t=>{if(t===""||t==="—")return null;const n=parseFloat(t.replace(/,/g,"").replace(/[^0-9.\-]/g,""));return isNaN(n)?t:n;};
+function tbl(cols,rows){const id="t"+(++TID);T[id]={cols,rows:[...rows],s:{i:null,d:1}};return `<div class="tablewrap scrollbox" data-t="${id}">${tinner(id)}</div>`;}
+function tinner(id){const{cols,rows,s}=T[id];
+  const h=cols.map((c,i)=>`<th class="${c.cls||''}" data-i="${i}">${c.h}${s.i===i?(s.d>0?" ▲":" ▼"):""}</th>`).join("");
+  const b=rows.map(r=>"<tr>"+cols.map(c=>`<td class="${c.cls||''}">${c.f(r)}</td>`).join("")+"</tr>").join("");
+  return `<table><thead><tr>${h}</tr></thead><tbody>${b}</tbody></table>`;}
+document.addEventListener("click",e=>{const th=e.target.closest("th[data-i]");if(!th)return;
+  const w=th.closest("[data-t]");if(!w)return;const o=T[w.dataset.t],i=+th.dataset.i;
+  if(o.s.i===i)o.s.d*=-1;else{o.s.i=i;o.s.d=1;}const col=o.cols[i],d=o.s.d,val=r=>sv(ctext(col.f(r)));
+  o.rows.sort((a,b)=>{const x=val(a),y=val(b);if(x===null)return 1;if(y===null)return -1;
+    return typeof x==="number"&&typeof y==="number"?(x-y)*d:String(x).localeCompare(String(y),"zh-Hant")*d;});
+  w.innerHTML=tinner(w.dataset.t);});
+
+// ---- 點類股 / 次產業（delegated）----
+document.addEventListener("click",e=>{const s=e.target.closest(".sl[data-sec]");if(!s)return;
+  const v=decodeURIComponent(s.dataset.sec),cur=state.sub[state.tab].open;
+  state.sub[state.tab].open=cur===v?null:v;state.sub[state.tab].opensub=null;render();});
+document.addEventListener("click",e=>{const s=e.target.closest(".sl[data-sub]");if(!s)return;
+  const v=decodeURIComponent(s.dataset.sub),cur=state.sub.chain.opensub;
+  state.sub.chain.opensub=cur===v?null:v;render();});
+
+// ---- render ----
+function renderMarket(){
+  const m=state.live.market;
+  document.getElementById("mkcard").innerHTML=`<div class="mkrow">
+    <span>大盤成交 <b>${yi(m.amt_yi)}</b></span>
+    <span>漲 <b class="up">${m.up}</b> / 跌 <b class="down">${m.down}</b> / 平 <span class="mut">${m.flat}</span></span>
+    <span class="mut">${m.n} 檔</span></div>`;
+  document.getElementById("tsline").textContent="資料時間 "+(state.live.ts||"—")+(isLocal?"":" · 點更新觸發雲端重抓");
+}
+function secCols(){return[
+  {h:"類股",cls:"l",f:r=>`<span class="sl ${state.sub[state.tab].open===r.sector?'sel':''}" data-sec="${encodeURIComponent(r.sector)}">${r.sector}</span>`},
+  {h:"成交值",f:r=>yi(r.amt_yi)},
+  {h:"淨流入",f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))},
+  {h:"均漲跌",f:r=>sgn(r.avg_chg,pct(r.avg_chg))},
+  {h:"漲/跌",f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`},
+  {h:"檔",f:r=>r.n}];}
+function stockRows(codes){
+  return codes.map(c=>{const v=sval(c);if(!v)return null;
+    return {code:c,name:(state.cl[c]||{}).n||c,chg:v.chg,amt:v.amt/1e8,close:v.close};})
+    .filter(Boolean).filter(r=>r.amt>0).sort((a,b)=>b.amt-a.amt);}
+function stockCols(){return[
+  {h:"代號",cls:"l",f:r=>yahoo(r.code)},{h:"名稱",cls:"l",f:r=>r.name},
+  {h:"漲跌",f:r=>sgn(r.chg,pct(r.chg))},{h:"成交值",f:r=>yi(r.amt)},
+  {h:"收盤",f:r=>r.close==null?"—":r.close.toLocaleString("en-US")}];}
+
+function render(){
+  for(const k in T)delete T[k];
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===state.tab));
+  if(!state.live||!state.cl){document.getElementById("main").innerHTML='<div class="loading">載入中…</div>';return;}
+  renderMarket();
+  const list=state.live[state.tab]||[], open=state.sub[state.tab].open;
+  let html="";
+  if(state.tab==="chain"){const c=state.live.chain_coverage||{};
+    html+=`<div class="note">產業鏈為<b>多對多</b>（一檔可屬多類）：各類加總會重疊、非市佔，代表主題曝險；不含指數/部分標的（涵蓋 ${c.with_chain||"—"}/${c.total||"—"} 檔）。點類股看次產業→成分股。</div>`;
+  }else html+=`<div class="note">交易所產業別（互斥）。淨流入＝漲家成交額−跌家成交額；均漲跌為成交額加權。點類股看成分股。</div>`;
+  html+=tbl(secCols(),list);
+  if(open){
+    if(state.tab==="exchange"){
+      const codes=Object.keys(state.cl).filter(c=>state.cl[c].e===open);
+      html+=`<div id="dd"><div class="crumb"><b>${open}</b> · ${stockRows(codes).length} 檔成分股（再點類股收合）</div>`+tbl(stockCols(),stockRows(codes))+`</div>`;
+    }else html+=`<div id="dd">`+chainSub(open)+`</div>`;
+  }
+  document.getElementById("main").innerHTML=html;
+  if(open){const boxes=[...document.querySelectorAll("#main .scrollbox")];
+    if(boxes.length>1)boxes.slice(0,-1).forEach(b=>b.style.maxHeight="34vh");
+    const dd=document.getElementById("dd");if(dd)dd.scrollIntoView({behavior:"smooth",block:"start"});}
+}
+function chainSub(ind){
+  const opensub=state.sub.chain.opensub, agg={};
+  for(const c in state.cl){const info=state.cl[c];if(!info.c.includes(ind))continue;const v=sval(c);if(!v)continue;
+    const subs=[...new Set(info.p.filter(p=>p[0]===ind).map(p=>p[1]))];
+    for(const s of subs){const o=agg[s]||(agg[s]={sub:s,amt:0,inflow:0,wchg:0,up:0,down:0,n:0});
+      const a=v.amt;o.amt+=a;o.wchg+=v.chg*a;o.n++;if(v.chg>0){o.up++;o.inflow+=a;}else if(v.chg<0){o.down++;o.inflow-=a;}}}
+  const subs=Object.values(agg).map(o=>({sub:o.sub,amt_yi:o.amt/1e8,inflow_yi:o.inflow/1e8,
+    avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n})).filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
+  const cols=[
+    {h:"次產業",cls:"l",f:r=>`<span class="sl ${opensub===r.sub?'sel':''}" data-sub="${encodeURIComponent(r.sub)}">${r.sub}</span>`},
+    {h:"成交值",f:r=>yi(r.amt_yi)},{h:"淨流入",f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))},
+    {h:"均漲跌",f:r=>sgn(r.avg_chg,pct(r.avg_chg))},{h:"漲/跌",f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`}];
+  let html=`<div class="crumb"><b>${ind}</b> · ${subs.length} 次產業（點看成分股；再點類股收合）</div>`+tbl(cols,subs);
+  if(opensub){const codes=Object.keys(state.cl).filter(c=>state.cl[c].p.some(p=>p[0]===ind&&p[1]===opensub));
+    html+=`<div id="dd2"><div class="crumb">${ind} › <b>${opensub}</b> · ${stockRows(codes).length} 檔</div>`+tbl(stockCols(),stockRows(codes))+`</div>`;}
+  return html;
+}
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{state.tab=t.dataset.tab;render();});
+
+// ---- data load / refresh ----
+async function loadJSON(u){return (await fetch(u,{cache:"no-store"})).json();}
+async function boot(){
+  try{state.cl=(await loadJSON("data/classify.json")).map;}catch(e){document.getElementById("main").innerHTML='<div class="loading">無法載入 classify.json：'+e+'</div>';return;}
+  try{state.live=await loadJSON("data/live.json"+(isLocal?"":"?t="+Date.now()));}catch(e){state.live=null;}
+  render();
+}
+async function dispatch(token){
+  const r=await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}/actions/workflows/${REPO.workflow}/dispatches`,
+    {method:"POST",headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json"},body:JSON.stringify({ref:REPO.branch})});
+  if(r.status===401||r.status===403){localStorage.removeItem("tflive_gh_token");throw new Error("Token 無效/無權限（已清除，請重設）");}
+  if(r.status!==204)throw new Error("dispatch 失敗 HTTP "+r.status);
+}
+async function pollLive(oldTs){
+  for(let i=0;i<24;i++){await new Promise(s=>setTimeout(s,6000));
+    try{const j=await loadJSON(RAW+"?t="+Date.now());if(j&&j.ts&&j.generated_at!==(state.live&&state.live.generated_at)){state.live=j;render();return true;}}catch(e){}
+    document.getElementById("refresh").textContent="⏳ "+((i+1)*6)+"s";}
+  return false;
+}
+async function refresh(){
+  const btn=document.getElementById("refresh");const old=btn.textContent;btn.textContent="⏳…";btn.disabled=true;
+  try{
+    if(isLocal){state.live=await loadJSON("/api/refresh");render();}
+    else{
+      let tok=localStorage.getItem("tflive_gh_token");
+      if(!tok){tok=prompt("貼上 GitHub fine-grained PAT（需 Actions 寫入權限，存於本機瀏覽器）：");
+        if(tok)localStorage.setItem("tflive_gh_token",tok.trim());}
+      if(tok){await dispatch(tok.trim());await pollLive();}
+      else{state.live=await loadJSON("data/live.json?t="+Date.now());render();}
+    }
+  }catch(e){alert(e.message||e);}finally{btn.textContent=old;btn.disabled=false;}
+}
+document.getElementById("refresh").onclick=e=>{ if(e.shiftKey){localStorage.removeItem("tflive_gh_token");alert("已清除 Token");return;} refresh(); };
+boot();
+</script>
+</body>
+</html>
