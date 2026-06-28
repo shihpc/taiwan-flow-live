@@ -105,14 +105,27 @@ def build_live() -> dict:
     dI = {"twse": float((idxrow.get("001") or {}).get("change_price") or 0),
           "tpex": float((idxrow.get("101") or {}).get("change_price") or 0)}
 
+    # 當日漲跌停價（判斷漲跌停；limit_up/down=0 代表無漲跌幅限制）
+    date = (ts or "")[:10]
+    limits = {}
+    try:
+        for r in fin.api_get("TaiwanStockPriceLimit", start_date=date, end_date=date):
+            limits[str(r["stock_id"])] = (float(r.get("limit_up") or 0), float(r.get("limit_down") or 0))
+    except Exception:
+        pass
+
     stocks, ex, ch = {}, {}, {}
-    mk = {"tse": {"amt": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0},
-          "otc": {"amt": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0}}
+    mk = {"tse": {"amt": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0, "ul": 0, "dl": 0},
+          "otc": {"amt": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0, "ul": 0, "dl": 0}}
     for code, info, amt, chg, bv, sv, dp, sh, etf, mkt, close, vol in items:
         pts = 0.0
         if sh and not etf and mkt in sum_mc and sum_mc[mkt]:
             pts = dI[mkt] * (dp * sh) / sum_mc[mkt]
-        stocks[code] = [round(chg, 2), round(amt), close, vol, round(bv), round(sv), round(pts, 3), round(dp, 2)]
+        lu, ld = limits.get(code, (0, 0))
+        lim = 1 if (close is not None and lu and close >= lu - 1e-6) else \
+            (-1 if (close is not None and ld and close <= ld + 1e-6) else 0)
+        stocks[code] = [round(chg, 2), round(amt), close, vol, round(bv), round(sv),
+                        round(pts, 3), round(dp, 2), lim]
         m = MKT.get(mkt)
         if not m:
             continue  # 無市場別（極少）→ 不計入分市場統計
@@ -125,15 +138,20 @@ def build_live() -> dict:
             b["down"] += 1
         else:
             b["flat"] += 1
+        if lim == 1:
+            b["ul"] += 1
+        elif lim == -1:
+            b["dl"] += 1
         _acc(ex, info["e"], m, amt, chg, pts)
         for nd in info["c"]:
             _acc(ch, nd, m, amt, chg, pts)
 
     cov = sum(1 for code in stocks if cl.get(code) and cl[code]["c"])
     market = {k: {"amt_yi": round(v["amt"] / 1e8, 1), "up": v["up"], "down": v["down"],
-                  "flat": v["flat"], "n": v["n"]} for k, v in mk.items()}
+                  "flat": v["flat"], "n": v["n"], "up_lim": v["ul"], "down_lim": v["dl"]}
+              for k, v in mk.items()}
     live = {"ts": ts, "generated_at": datetime.now(TPE).isoformat(),
-            "stock_cols": ["chg", "amt", "close", "vol", "bv", "sv", "pts", "dp"],
+            "stock_cols": ["chg", "amt", "close", "vol", "bv", "sv", "pts", "dp", "lim"],
             "index": {"tse": _idx(idxrow, "001"), "otc": _idx(idxrow, "101")},
             "market": market, "exchange": _finalize(ex), "chain": _finalize(ch),
             "chain_coverage": {"with_chain": cov, "total": len(stocks)},

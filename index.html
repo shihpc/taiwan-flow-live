@@ -33,10 +33,15 @@ main{padding:8px 10px 30px}
 table{border-collapse:collapse;width:100%;white-space:nowrap}
 th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line);font-size:13px}
 th{position:sticky;top:0;background:var(--panel2);color:var(--dim);font-weight:500;font-size:11px;cursor:pointer;user-select:none}
-td.l,th.l{text-align:left}
+td.l,th.l{text-align:left;position:sticky;left:0;z-index:1;background:var(--bg)}
+thead th.l{z-index:3;background:var(--panel2)}
 tbody tr:nth-child(odd) td{background:#0c121a}
+tbody tr:nth-child(odd) td.l{background:#0c121a}
 tbody tr:active td{background:#16222f}
-tr.pin td{background:#16202c;font-weight:600;border-bottom:1px solid var(--accent)}
+tbody tr.pin td{background:#16202c;font-weight:600;border-bottom:1px solid var(--accent)}
+tbody tr.pin td.l{background:#16202c}
+td.lu{background:var(--up)!important;color:#fff}
+td.ld{background:var(--down)!important;color:#fff}
 .up{color:var(--up)}.down{color:var(--down)}.mut{color:var(--muted)}
 .sl{cursor:pointer;border-bottom:1px dotted currentColor}
 .sl.sel{font-weight:700;border-bottom-style:solid}
@@ -77,7 +82,7 @@ const pct=v=>v==null?"—":(v>0?"+":"")+v.toFixed(2)+"%";
 const sgn=(v,t)=>`<span class="${v>0?'up':v<0?'down':'mut'}">${t}</span>`;
 const yahoo=c=>`<a href="https://tw.stock.yahoo.com/quote/${c}" target="_blank" rel="noopener" style="color:var(--accent)">${c}</a>`;
 const cleanSub=s=>(s||"").replace(/\s*[（(].*$/,"");  // 次產業顯示去掉括號內說明
-const SC=["chg","amt","close","vol","bv","sv","pts","dp"]; // live.stocks 陣列欄位（後備）
+const SC=["chg","amt","close","vol","bv","sv","pts","dp","lim"]; // live.stocks 陣列欄位（後備）
 const sval=(code)=>{const a=state.live.stocks[code]; if(!a)return null; const cols=(state.live&&state.live.stock_cols)||SC; const o={}; cols.forEach((k,i)=>o[k]=a[i]); return o;};
 
 // ---- sortable table ----
@@ -88,7 +93,7 @@ function tbl(cols,rows,pin){const id="t"+(++TID);T[id]={cols,rows:[...rows],s:{i
 function tinner(id){const{cols,rows,s,pin}=T[id];
   const w=c=>c.w?`width:${c.w}px;min-width:${c.w}px;max-width:${c.w}px`:'';
   const h=cols.map((c,i)=>`<th class="${c.cls||''}" style="${w(c)}" data-i="${i}">${c.h}${s.i===i?(s.d>0?" ▲":" ▼"):""}</th>`).join("");
-  const tr=(r,cls)=>`<tr class="${cls||''}">`+cols.map(c=>`<td class="${c.cls||''}" style="${w(c)}">${c.f(r)}</td>`).join("")+"</tr>";
+  const tr=(r,cls)=>`<tr class="${cls||''}">`+cols.map(c=>`<td class="${c.cls||''} ${c.cf?c.cf(r):''}" style="${w(c)}">${c.f(r)}</td>`).join("")+"</tr>";
   return `<table><thead><tr>${h}</tr></thead><tbody>${pin?tr(pin,"pin"):""}${rows.map(r=>tr(r)).join("")}</tbody></table>`;}
 document.addEventListener("click",e=>{const th=e.target.closest("th[data-i]");if(!th)return;
   const w=th.closest("[data-t]");if(!w)return;const o=T[w.dataset.t],i=+th.dataset.i;
@@ -109,7 +114,7 @@ document.addEventListener("click",e=>{const s=e.target.closest(".sl[data-sub]");
 function idxLine(label,d,mk){
   if(!d||d.val==null)return `<span>${label} <span class="mut">—</span></span>`;
   const v=d.val.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const cnt=mk?` <span class="mut">漲<span class="up">${mk.up}</span>/跌<span class="down">${mk.down}</span> ${mk.n}檔</span>`:"";
+  const cnt=mk?` <span class="mut">漲<span class="up">${mk.up}(${mk.up_lim||0})</span>/跌<span class="down">${mk.down}(${mk.down_lim||0})</span> ${mk.n}檔</span>`:"";
   return `<span>${label} <b>${v}</b> ${sgn(d.chgP,(d.chgP>0?'+':'')+d.chgP.toFixed(2)+' ('+pct(d.chg)+')')} <span class="mut">量${yi(d.amt_yi)}</span>${cnt}</span>`;
 }
 function renderMarket(){
@@ -133,12 +138,12 @@ function stockCols(){return[
   {h:"個股",cls:"l",w:W[0],f:r=>r.name}, C_AMT, C_INF, C_PTS,
   {h:"漲跌%",w:W[4],f:r=>r.chgp==null?'<span class="mut">—</span>':sgn(r.chgp,pct(r.chgp))},
   {h:"漲跌額",w:W[5],f:r=>r.dp==null?'<span class="mut">—</span>':sgn(r.dp,(r.dp>0?"+":"")+r.dp.toFixed(2))},
-  {h:"最新價",w:W[6],f:r=>r.price==null?'<span class="mut">—</span>':r.price.toLocaleString("en-US")}];}
+  {h:"最新價",w:W[6],cf:r=>r.lim===1?'lu':r.lim===-1?'ld':'',f:r=>r.price==null?'<span class="mut">—</span>':r.price.toLocaleString("en-US")}];}
 function sumRow(a,label){return {name:`<b>${label} 合計</b>`,amt_yi:a.amt_yi,inflow_yi:a.inflow_yi,pts:a.pts,chgp:a.avg_chg,dp:null,price:null};}
 function stockRows(codes){
   const want=state.idx==="tse"?"twse":"tpex";
   return codes.filter(c=>(state.cl[c]||{}).t===want).map(c=>{const v=sval(c);if(!v)return null;const info=state.cl[c]||{};const a=v.amt/1e8;
-    return {name:`${yahoo(c)} ${info.n||c}`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close};})
+    return {name:`${yahoo(c)} ${info.n||c}`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close,lim:v.lim};})
     .filter(Boolean).filter(r=>r.amt_yi>0).sort((x,y)=>y.amt_yi-x.amt_yi);}
 
 function render(){
