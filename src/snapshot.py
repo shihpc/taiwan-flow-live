@@ -30,31 +30,30 @@ def _classify() -> dict:
 
 
 def _z() -> dict:
-    return {"amt": 0.0, "inflow": 0.0, "wchg": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0, "pts": 0.0}
+    return {"amt": 0.0, "lw": 0.0, "wchg": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0, "pts": 0.0}
 
 
-def _acc(d: dict, key: str, m: str, amt, chg, pts):
+def _acc(d: dict, key: str, m: str, amt, lw, chg, pts):
     o = d.get(key)
     if not o:
         o = d[key] = {"sector": key, "tse": _z(), "otc": _z()}
     b = o[m]
     b["amt"] += amt
+    b["lw"] += lw
     b["wchg"] += chg * amt
     b["n"] += 1
     b["pts"] += pts
     if chg > 0:
         b["up"] += 1
-        b["inflow"] += amt
     elif chg < 0:
         b["down"] += 1
-        b["inflow"] -= amt
     else:
         b["flat"] += 1
 
 
 def _one(b: dict) -> dict:
     amt = b["amt"]
-    return {"amt_yi": round(amt / 1e8, 2), "inflow_yi": round(b["inflow"] / 1e8, 2),
+    return {"amt_yi": round(amt / 1e8, 2), "lw_amt_yi": round(b["lw"] / 1e8, 2),
             "avg_chg": round(b["wchg"] / amt, 2) if amt else 0.0,
             "up": b["up"], "down": b["down"], "flat": b["flat"], "n": b["n"], "pts": round(b["pts"], 2)}
 
@@ -68,6 +67,45 @@ def _idx(rowmap: dict, code: str) -> dict:
     r = rowmap.get(code) or {}
     return {"val": r.get("close"), "chgP": r.get("change_price"), "chg": r.get("change_rate"),
             "vol": r.get("total_volume"), "amt_yi": round(float(r.get("total_amount") or 0) / 1e8, 1)}
+
+
+def _lastweek() -> dict:
+    """上週(前一日曆週 週一~週五)各工作天成交值(Trading_money)加總；週快取 data/lastweek.json，一週只抓一次。
+    回 {week, stocks:{code:元}, tot:{twse,tpex 元}}。"""
+    today = datetime.now(TPE).date()
+    lw_mon = today - timedelta(days=today.weekday() + 7)
+    dates = [(lw_mon + timedelta(days=i)).isoformat() for i in range(5)]
+    p = fin.ROOT / "data" / "lastweek.json"
+    if p.exists():
+        try:
+            j = json.loads(p.read_text(encoding="utf-8"))
+            if j.get("week") == dates[0]:
+                return j
+        except Exception:
+            pass
+    cl = _classify()
+    stk: dict[str, float] = {}
+    for d in dates:
+        try:
+            rows = fin.api_get("TaiwanStockPrice", start_date=d, end_date=d)
+        except Exception:
+            rows = []
+        for r in rows:
+            c = str(r.get("stock_id") or "")
+            # 只計真實個股/ETF：在 classify 內(排除權證) 且代號數字開頭(排除 TAIEX/類股指數 等 pseudo)
+            if c not in cl or not c[:1].isdigit():
+                continue
+            tm = r.get("Trading_money")
+            if tm:
+                stk[c] = stk.get(c, 0.0) + float(tm)
+    tot = {"twse": 0.0, "tpex": 0.0}
+    for c, a in stk.items():
+        t = cl[c].get("t")
+        if t in tot:
+            tot[t] += a
+    j = {"week": dates[0], "stocks": {c: round(a) for c, a in stk.items()}, "tot": tot}
+    p.write_text(json.dumps(j, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return j
 
 
 def build_live() -> dict:
@@ -114,6 +152,9 @@ def build_live() -> dict:
     except Exception:
         pass
 
+    lw = _lastweek()               # 上週各工作天成交值（週快取）
+    lwmap, lwtot = lw["stocks"], lw["tot"]
+
     stocks, ex, ch = {}, {}, {}
     mk = {"tse": {"amt": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0, "ul": 0, "dl": 0},
           "otc": {"amt": 0.0, "up": 0, "down": 0, "flat": 0, "n": 0, "ul": 0, "dl": 0}}
@@ -121,11 +162,12 @@ def build_live() -> dict:
         pts = 0.0
         if sh and not etf and mkt in sum_mc and sum_mc[mkt]:
             pts = dI[mkt] * (dp * sh) / sum_mc[mkt]
+        lwa = float(lwmap.get(code, 0))
         lu, ld = limits.get(code, (0, 0))
         lim = 1 if (close is not None and lu and close >= lu - 1e-6) else \
             (-1 if (close is not None and ld and close <= ld + 1e-6) else 0)
         stocks[code] = [round(chg, 2), round(amt), close, vol, round(bv), round(sv),
-                        round(pts, 3), round(dp, 2), lim]
+                        round(pts, 3), round(dp, 2), lim, round(lwa)]
         m = MKT.get(mkt)
         if not m:
             continue  # 無市場別（極少）→ 不計入分市場統計
@@ -142,16 +184,18 @@ def build_live() -> dict:
             b["ul"] += 1
         elif lim == -1:
             b["dl"] += 1
-        _acc(ex, info["e"], m, amt, chg, pts)
+        _acc(ex, info["e"], m, amt, lwa, chg, pts)
         for nd in info["c"]:
-            _acc(ch, nd, m, amt, chg, pts)
+            _acc(ch, nd, m, amt, lwa, chg, pts)
 
     cov = sum(1 for code in stocks if cl.get(code) and cl[code]["c"])
-    market = {k: {"amt_yi": round(v["amt"] / 1e8, 1), "up": v["up"], "down": v["down"],
-                  "flat": v["flat"], "n": v["n"], "up_lim": v["ul"], "down_lim": v["dl"]}
+    _lwk = {"tse": "twse", "otc": "tpex"}
+    market = {k: {"amt_yi": round(v["amt"] / 1e8, 1), "lw_amt_yi": round(lwtot.get(_lwk[k], 0) / 1e8, 1),
+                  "up": v["up"], "down": v["down"], "flat": v["flat"], "n": v["n"],
+                  "up_lim": v["ul"], "down_lim": v["dl"]}
               for k, v in mk.items()}
     live = {"ts": ts, "generated_at": datetime.now(TPE).isoformat(),
-            "stock_cols": ["chg", "amt", "close", "vol", "bv", "sv", "pts", "dp", "lim"],
+            "stock_cols": ["chg", "amt", "close", "vol", "bv", "sv", "pts", "dp", "lim", "lw"],
             "index": {"tse": _idx(idxrow, "001"), "otc": _idx(idxrow, "101")},
             "market": market, "exchange": _finalize(ex), "chain": _finalize(ch),
             "chain_coverage": {"with_chain": cov, "total": len(stocks)},

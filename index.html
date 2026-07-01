@@ -86,7 +86,7 @@ const pct=v=>v==null?"—":(v>0?"+":"")+v.toFixed(2)+"%";
 const sgn=(v,t)=>`<span class="${v>0?'up':v<0?'down':'mut'}">${t}</span>`;
 const yahoo=c=>`<a href="https://tw.stock.yahoo.com/quote/${c}" target="_blank" rel="noopener" style="color:var(--accent)">${c}</a>`;
 const cleanSub=s=>(s||"").replace(/\s*[（(].*$/,"");  // 次產業顯示去掉括號內說明
-const SC=["chg","amt","close","vol","bv","sv","pts","dp","lim"]; // live.stocks 陣列欄位（後備）
+const SC=["chg","amt","close","vol","bv","sv","pts","dp","lim","lw"]; // live.stocks 陣列欄位（後備）
 const sval=(code)=>{const a=state.live.stocks[code]; if(!a)return null; const cols=(state.live&&state.live.stock_cols)||SC; const o={}; cols.forEach((k,i)=>o[k]=a[i]); return o;};
 
 // ---- sortable table ----
@@ -129,28 +129,36 @@ function renderMarket(){
     `<div class="mkrow">${idxLine("櫃買",ix.otc,m.otc,"otc")}</div>`;
   document.getElementById("tsline").textContent="資料時間 "+(state.live.ts||"—")+(isLocal?"":" · 點更新觸發雲端重抓");
 }
-// 該市場(加權/櫃買)總成交值＝指數量(001/101)，退化用 market 加總；佔比分母
-function mktTotal(){const ix=state.live.index||{},m=state.live.market||{};
-  return (ix[state.idx]&&ix[state.idx].amt_yi)||(m[state.idx]&&m[state.idx].amt_yi)||0;}
-// 三表共用欄寬（前6欄同寬同序；末2欄 類股/次產業＝漲/跌、檔；成分股＝漲跌額、最新價）
-const W=[116,74,54,80,58,62,60,66];
+// 佔比分母＝該市場(加權/櫃買)分類股總成交值：今日 amt_yi / 上週 lw_amt_yi
+function mktTotal(){const m=state.live.market||{};return (m[state.idx]&&m[state.idx].amt_yi)||0;}
+function mktLwTotal(){const m=state.live.market||{};return (m[state.idx]&&m[state.idx].lw_amt_yi)||0;}
+const shr=r=>{const t=mktTotal();return t?r.amt_yi/t*100:0;};              // 佔比%
+const lwShr=r=>{const t=mktLwTotal();return t?(r.lw_amt_yi||0)/t*100:0;};  // 上週佔%
+const pctCell=(v,signed)=>signed?sgn(v,(v>0?"+":"")+v.toFixed(2)+"%"):v.toFixed(2)+"%";
+// 三表共用欄寬（前7欄同序同寬；末2欄 類股/次產業＝漲/跌、檔；成分股＝漲跌額、最新價；再接 上週佔、上週均）
+const W=[116,74,54,58,54,58,58,60,58,66,56,56];
 const C_AMT={h:"成交值",w:W[1],f:r=>yi(r.amt_yi)};
-const C_SHARE={h:"佔比",w:W[2],f:r=>{const t=mktTotal();return t?(r.amt_yi/t*100).toFixed(2)+"%":"—";}};
-const C_INF={h:"淨流入",w:W[3],f:r=>sgn(r.inflow_yi,yi(r.inflow_yi))};
-const C_PTS={h:"貢獻點",w:W[4],f:r=>sgn(r.pts||0,((r.pts||0)>0?"+":"")+(r.pts||0).toFixed(1))};
+const C_SHR={h:"佔比",w:W[2],f:r=>pctCell(shr(r))};
+const C_SCHG={h:"佔週變",w:W[3],f:r=>pctCell(shr(r)-lwShr(r),1)};
+const C_ASHR={h:"均佔",w:W[4],f:r=>pctCell(shr(r)/(r.n||1))};
+const C_ACHG={h:"均週變",w:W[5],f:r=>pctCell(shr(r)/(r.n||1)-lwShr(r)/(r.n||1),1)};
+const C_PTS={h:"貢獻點",w:W[6],f:r=>sgn(r.pts||0,((r.pts||0)>0?"+":"")+(r.pts||0).toFixed(1))};
+const C_LWSHR={h:"上週佔",w:W[10],f:r=>pctCell(lwShr(r))};
+const C_LWAVG={h:"上週均",w:W[11],f:r=>pctCell(lwShr(r)/(r.n||1))};
 function aggCols(nameH){return[
-  {h:nameH,cls:"l",w:W[0],f:r=>r.name}, C_AMT, C_SHARE, C_INF, C_PTS,
-  {h:"漲跌%",w:W[5],f:r=>sgn(r.avg_chg,pct(r.avg_chg))},
-  {h:"漲/跌",w:W[6],f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`},
-  {h:"檔",w:W[7],f:r=>r.n}];}
+  {h:nameH,cls:"l",w:W[0],f:r=>r.name}, C_AMT, C_SHR, C_SCHG, C_ASHR, C_ACHG, C_PTS,
+  {h:"漲跌%",w:W[7],f:r=>sgn(r.avg_chg,pct(r.avg_chg))},
+  {h:"漲/跌",w:W[8],f:r=>`<span class="up">${r.up}</span>/<span class="down">${r.down}</span>`},
+  {h:"檔",w:W[9],f:r=>r.n}, C_LWSHR, C_LWAVG];}
 function stockCols(){return[
-  {h:"個股",cls:"l",w:W[0],f:r=>r.name}, C_AMT, C_SHARE, C_INF, C_PTS,
-  {h:"漲跌%",w:W[5],f:r=>r.chgp==null?'<span class="mut">—</span>':sgn(r.chgp,pct(r.chgp))},
-  {h:"漲跌額",w:W[6],f:r=>r.dp==null?'<span class="mut">—</span>':sgn(r.dp,(r.dp>0?"+":"")+r.dp.toFixed(2))},
-  {h:"最新價",w:W[7],cf:r=>r.lim===1?'lu':r.lim===-1?'ld':'',f:r=>r.price==null?'<span class="mut">—</span>':r.price.toLocaleString("en-US")}];}
-function sumRow(a,label){return {name:`<b>${label} 合計</b>`,amt_yi:a.amt_yi,inflow_yi:a.inflow_yi,pts:a.pts,chgp:a.avg_chg,dp:null,price:null};}
+  {h:"個股",cls:"l",w:W[0],f:r=>r.name}, C_AMT, C_SHR, C_SCHG, C_ASHR, C_ACHG, C_PTS,
+  {h:"漲跌%",w:W[7],f:r=>r.chgp==null?'<span class="mut">—</span>':sgn(r.chgp,pct(r.chgp))},
+  {h:"漲跌額",w:W[8],f:r=>r.dp==null?'<span class="mut">—</span>':sgn(r.dp,(r.dp>0?"+":"")+r.dp.toFixed(2))},
+  {h:"最新價",w:W[9],cf:r=>r.lim===1?'lu':r.lim===-1?'ld':'',f:r=>r.price==null?'<span class="mut">—</span>':r.price.toLocaleString("en-US")},
+  C_LWSHR, C_LWAVG];}
+function sumRow(a,label){return {name:`<b>${label} 合計</b>`,amt_yi:a.amt_yi,lw_amt_yi:a.lw_amt_yi,n:a.n,pts:a.pts,chgp:a.avg_chg,dp:null,price:null};}
 function mkStockRow(c){const v=sval(c);if(!v)return null;const info=state.cl[c]||{};const a=v.amt/1e8;
-  return {name:`${yahoo(c)}<span class="nm">${info.n||c}</span>`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close,lim:v.lim};}
+  return {name:`${yahoo(c)}<span class="nm">${info.n||c}</span>`,amt_yi:a,lw_amt_yi:(v.lw||0)/1e8,n:1,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close,lim:v.lim};}
 function stockRows(codes){
   const want=state.idx==="tse"?"twse":"tpex";
   return codes.filter(c=>(state.cl[c]||{}).t===want).map(mkStockRow).filter(Boolean).filter(r=>r.amt_yi>0).sort((x,y)=>y.amt_yi-x.amt_yi);}
@@ -202,10 +210,10 @@ function chainSub(ind,indAgg){
   const opensub=state.sub.chain.opensub, agg={}, want=state.idx==="tse"?"twse":"tpex";
   for(const c in state.cl){const info=state.cl[c];if(!info.c.includes(ind)||info.t!==want)continue;const v=sval(c);if(!v)continue;
     const subs=[...new Set(info.p.filter(p=>p[0]===ind).map(p=>p[1]))];
-    for(const s of subs){const o=agg[s]||(agg[s]={sub:s,amt:0,inflow:0,wchg:0,up:0,down:0,n:0,pts:0});
-      const a=v.amt;o.amt+=a;o.wchg+=v.chg*a;o.n++;o.pts+=v.pts;
-      if(v.chg>0){o.up++;o.inflow+=a;}else if(v.chg<0){o.down++;o.inflow-=a;}}}
-  const subs=Object.values(agg).map(o=>({sub:o.sub,amt_yi:o.amt/1e8,inflow_yi:o.inflow/1e8,
+    for(const s of subs){const o=agg[s]||(agg[s]={sub:s,amt:0,lw:0,wchg:0,up:0,down:0,n:0,pts:0});
+      const a=v.amt;o.amt+=a;o.lw+=(v.lw||0);o.wchg+=v.chg*a;o.n++;o.pts+=v.pts;
+      if(v.chg>0)o.up++;else if(v.chg<0)o.down++;}}
+  const subs=Object.values(agg).map(o=>({sub:o.sub,amt_yi:o.amt/1e8,lw_amt_yi:o.lw/1e8,
     avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n,pts:o.pts,
     name:`<span class="sl ${opensub===o.sub?'sel':''}" data-sub="${encodeURIComponent(o.sub)}">${cleanSub(o.sub)}</span>`}))
     .filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
