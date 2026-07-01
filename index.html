@@ -191,14 +191,14 @@ function render(){
       const codes=Object.keys(state.cl).filter(c=>state.cl[c].e===open);
       const rows=stockRows(codes), agg=list.find(r=>r.sector===open);
       html+=`<div id="dd"${/ETF/.test(open)?' class="wrap2"':''}><div class="crumb"><b>${open}</b> 成分股（${rows.length}，再點類股收合）</div>`+tbl(stockCols(),rows,agg?sumRow(agg,open):null)+`</div>`;
-    }else html+=`<div id="dd">`+chainSub(open)+`</div>`;
+    }else html+=`<div id="dd">`+chainSub(open, list.find(r=>r.sector===open))+`</div>`;
   }
   document.getElementById("main").innerHTML=html;
   if(open){const boxes=[...document.querySelectorAll("#main .scrollbox")];
     if(boxes.length>1)boxes.slice(0,-1).forEach(b=>b.style.maxHeight="34vh");
     const dd=document.getElementById("dd");if(dd)dd.scrollIntoView({behavior:"smooth",block:"start"});}
 }
-function chainSub(ind){
+function chainSub(ind,indAgg){
   const opensub=state.sub.chain.opensub, agg={}, want=state.idx==="tse"?"twse":"tpex";
   for(const c in state.cl){const info=state.cl[c];if(!info.c.includes(ind)||info.t!==want)continue;const v=sval(c);if(!v)continue;
     const subs=[...new Set(info.p.filter(p=>p[0]===ind).map(p=>p[1]))];
@@ -209,7 +209,7 @@ function chainSub(ind){
     avg_chg:o.amt?o.wchg/o.amt:0,up:o.up,down:o.down,n:o.n,pts:o.pts,
     name:`<span class="sl ${opensub===o.sub?'sel':''}" data-sub="${encodeURIComponent(o.sub)}">${cleanSub(o.sub)}</span>`}))
     .filter(o=>o.amt_yi>0).sort((a,b)=>b.amt_yi-a.amt_yi);
-  let html=`<div class="crumb"><b>${ind}</b> · ${subs.length} 次產業（點看成分股；再點類股收合）</div>`+tbl(aggCols("次產業"),subs);
+  let html=`<div class="crumb"><b>${ind}</b> · ${subs.length} 次產業（點看成分股；再點類股收合）</div>`+tbl(aggCols("次產業"),subs,indAgg?{...indAgg,name:`<b>${ind} 合計</b>`}:null);
   if(opensub){const codes=Object.keys(state.cl).filter(c=>state.cl[c].p.some(p=>p[0]===ind&&p[1]===opensub));
     const rows=stockRows(codes), sa=subs.find(s=>s.sub===opensub);
     html+=`<div id="dd2"><div class="crumb">${ind} › <b>${cleanSub(opensub)}</b> 成分股（${rows.length}）</div>`+tbl(stockCols(),rows,sa?sumRow(sa,cleanSub(opensub)):null)+`</div>`;}
