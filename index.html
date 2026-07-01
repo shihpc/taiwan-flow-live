@@ -35,6 +35,9 @@ th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--line);font-
 th{position:sticky;top:0;background:var(--panel2);color:var(--dim);font-weight:500;font-size:11px;cursor:pointer;user-select:none}
 td.l,th.l{text-align:left;position:sticky;left:0;z-index:1;background:var(--bg);overflow:hidden;text-overflow:ellipsis}
 .clk{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+.wrap2 td.l{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;word-break:break-all}
+.nm{margin-left:4px}
+.wrap2 td.l a{display:block}.wrap2 td.l .nm{display:block;font-size:11px;margin-left:0}
 thead th.l{z-index:3;background:var(--panel2)}
 tbody tr:nth-child(odd) td{background:#0c121a}
 tbody tr:nth-child(odd) td.l{background:#0c121a}
@@ -143,7 +146,7 @@ function stockCols(){return[
   {h:"最新價",w:W[6],cf:r=>r.lim===1?'lu':r.lim===-1?'ld':'',f:r=>r.price==null?'<span class="mut">—</span>':r.price.toLocaleString("en-US")}];}
 function sumRow(a,label){return {name:`<b>${label} 合計</b>`,amt_yi:a.amt_yi,inflow_yi:a.inflow_yi,pts:a.pts,chgp:a.avg_chg,dp:null,price:null};}
 function mkStockRow(c){const v=sval(c);if(!v)return null;const info=state.cl[c]||{};const a=v.amt/1e8;
-  return {name:`${yahoo(c)} ${info.n||c}`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close,lim:v.lim};}
+  return {name:`${yahoo(c)}<span class="nm">${info.n||c}</span>`,amt_yi:a,inflow_yi:v.chg>0?a:v.chg<0?-a:0,pts:v.pts,chgp:v.chg,dp:v.dp,price:v.close,lim:v.lim};}
 function stockRows(codes){
   const want=state.idx==="tse"?"twse":"tpex";
   return codes.filter(c=>(state.cl[c]||{}).t===want).map(mkStockRow).filter(Boolean).filter(r=>r.amt_yi>0).sort((x,y)=>y.amt_yi-x.amt_yi);}
@@ -183,7 +186,7 @@ function render(){
     if(state.tab==="exchange"){
       const codes=Object.keys(state.cl).filter(c=>state.cl[c].e===open);
       const rows=stockRows(codes), agg=list.find(r=>r.sector===open);
-      html+=`<div id="dd"><div class="crumb"><b>${open}</b> 成分股（${rows.length}，再點類股收合）</div>`+tbl(stockCols(),rows,agg?sumRow(agg,open):null)+`</div>`;
+      html+=`<div id="dd"${/ETF/.test(open)?' class="wrap2"':''}><div class="crumb"><b>${open}</b> 成分股（${rows.length}，再點類股收合）</div>`+tbl(stockCols(),rows,agg?sumRow(agg,open):null)+`</div>`;
     }else html+=`<div id="dd">`+chainSub(open)+`</div>`;
   }
   document.getElementById("main").innerHTML=html;
