@@ -65,6 +65,7 @@ footer{color:var(--muted);font-size:11px;text-align:center;padding:14px}
   <div class="tabs" id="tabs">
     <div class="tab active" data-tab="exchange">產業別</div>
     <div class="tab" data-tab="chain">產業鏈</div>
+    <div class="tab" data-tab="rank">成交佔比</div>
   </div>
 </header>
 <div class="card" id="mkcard" style="margin:8px 10px"></div>
@@ -129,6 +130,17 @@ function renderMarket(){
     `<div class="mkrow">${idxLine("櫃買",ix.otc,m.otc,"otc")}</div>`;
   document.getElementById("tsline").textContent="資料時間 "+(state.live.ts||"—")+(isLocal?"":" · 點更新觸發雲端重抓");
 }
+function idxSeg(){return `<div style="display:flex;gap:6px;margin:2px 0 8px;align-items:center"><span class="mut" style="font-size:11px">市場</span>`+
+  `<button class="seg2 ${state.idx==='tse'?'on':''}" data-idx="tse">加權(TSE)</button>`+
+  `<button class="seg2 ${state.idx==='otc'?'on':''}" data-idx="otc">櫃買(OTC)</button></div>`;}
+// 成交佔比 tab：該市場全個股，預設依佔週變(佔比−上週佔)由大到小
+function renderRank(){
+  const want=state.idx==="tse"?"twse":"tpex", mn=state.idx==="tse"?"加權":"櫃買";
+  const rows=Object.keys(state.live.stocks).filter(c=>(state.cl[c]||{}).t===want).map(mkStockRow).filter(Boolean)
+    .filter(r=>r.amt_yi>0).sort((a,b)=>(shr(b)-lwShr(b))-(shr(a)-lwShr(a)));
+  document.getElementById("main").innerHTML=
+    `<div class="note">${mn}市場全個股（${rows.length}），預設依「佔週變」由大到小（點欄位標題可改排序）。</div>`+idxSeg()+tbl(stockCols(),rows);
+}
 // 佔比分母＝該市場(加權/櫃買)分類股總成交值：今日 amt_yi / 上週 lw_amt_yi
 function mktTotal(){const m=state.live.market||{};return (m[state.idx]&&m[state.idx].amt_yi)||0;}
 function mktLwTotal(){const m=state.live.market||{};return (m[state.idx]&&m[state.idx].lw_amt_yi)||0;}
@@ -182,6 +194,7 @@ function render(){
   if(!state.live||!state.cl){document.getElementById("main").innerHTML='<div class="loading">載入中…</div>';return;}
   renderMarket();
   if(state.pool)return renderPool();
+  if(state.tab==="rank")return renderRank();
   const open=state.sub[state.tab].open;
   const list=(state.live[state.tab]||[]).map(s=>{const o={sector:s.sector,...s[state.idx]};
       o.name=`<span class="sl ${open===s.sector?'sel':''}" data-sec="${encodeURIComponent(s.sector)}">${s.sector}</span>`;return o;})
@@ -190,9 +203,7 @@ function render(){
   if(state.tab==="chain"){const c=state.live.chain_coverage||{};
     html+=`<div class="note">產業鏈為<b>多對多</b>（一檔可屬多類）：各類加總會重疊、非市佔，代表主題曝險；不含指數/部分標的（涵蓋 ${c.with_chain||"—"}/${c.total||"—"} 檔）。點類股看次產業→成分股。</div>`;
   }else html+=`<div class="note">交易所產業別（互斥）。淨流入＝漲家額−跌家額；貢獻點＝個股依市值權重對指數的漲跌點，類股加總＝指數漲跌點。點類股看成分股。</div>`;
-  html+=`<div style="display:flex;gap:6px;margin:2px 0 8px;align-items:center"><span class="mut" style="font-size:11px">貢獻點對象</span>
-    <button class="seg2 ${state.idx==='tse'?'on':''}" data-idx="tse">加權(TSE)</button>
-    <button class="seg2 ${state.idx==='otc'?'on':''}" data-idx="otc">櫃買(OTC)</button></div>`;
+  html+=idxSeg();
   html+=tbl(aggCols("類股"),list);
   if(open){
     if(state.tab==="exchange"){
